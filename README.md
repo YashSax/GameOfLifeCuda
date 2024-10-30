@@ -21,3 +21,8 @@ CPU Execution Time scales quadratically with respect to the board size (understa
 
 Both CPU and GPU Execution Time scale linearly with the number of steps (understandably).
 ![Number of Steps vs. Execution Time](figures/perf_vs_steps.png)
+
+Steps to run:
+```
+make run
+```
