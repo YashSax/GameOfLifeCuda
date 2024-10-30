@@ -5,12 +5,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#define PERFORMANCE_COMPARISON_MODE true
+#define PERFORMANCE_COMPARISON_MODE false
 
 #if PERFORMANCE_COMPARISON_MODE
     #define BOARD_HEIGHT 512
     #define BOARD_WIDTH  512
-    #define NUM_STEPS 256
 #else
     #define BOARD_HEIGHT 10
     #define BOARD_WIDTH  10
@@ -18,14 +17,20 @@
 
 #define COORD_TO_IDX(row, col) ((row) * BOARD_WIDTH + (col))
 
-double get_time() {
+// The following only matter if PERFORMANCE_COMPARISON_MODE is true. 
+#define NUM_STEPS 256
+#define BOARD_SIZE BOARD_HEIGHT * BOARD_WIDTH
+
+
+double getTime() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+
 void printBoard(int *board) {
-    // system("cls");
+    system("cls");
     printf("\n");
     for (int i = 0; i < BOARD_HEIGHT; i++) {
         for (int j = 0; j < BOARD_WIDTH; j++) {
@@ -35,6 +40,7 @@ void printBoard(int *board) {
         printf("\n");
     }
 }
+
 
 __host__ __device__ int numNeighbors(int* board, int row, int col) {
     int neighborCount = 0;
@@ -67,6 +73,7 @@ __host__ __device__ int numNeighbors(int* board, int row, int col) {
     return neighborCount;
 }
 
+
 __global__ void stepBoardCuda(int* board, int* newBoard) {
     int row = blockIdx.x;
     int col = threadIdx.x;
@@ -81,6 +88,7 @@ __global__ void stepBoardCuda(int* board, int* newBoard) {
     }
 }
 
+
 int* stepBoard(int* board) {
     int* newBoard = (int*) malloc(BOARD_HEIGHT * BOARD_WIDTH * sizeof(int));
     for (int i = 0; i < BOARD_HEIGHT * BOARD_WIDTH; i++) {
@@ -90,89 +98,96 @@ int* stepBoard(int* board) {
     for (int i = 0; i < BOARD_HEIGHT; i++) {
         for (int j = 0; j < BOARD_WIDTH; j++) {
             int neighborCount = numNeighbors(board, i, j);
-            // printf("%d ", neighborCount);
-
             int idx = i * BOARD_WIDTH + j;
             if (board[idx]) {
-                // live
-                if (neighborCount < 2 || neighborCount > 3) {
-                    newBoard[idx] = 0;
-                }
+                newBoard[idx] = neighborCount == 2 || neighborCount == 3;
             } else {
-                // dead
-                if (neighborCount == 3) {
-                    newBoard[idx] = 1;
-                }
+                newBoard[idx] = neighborCount == 3;
             }
         }
-        // printf("\n");
     }
     return newBoard;
 }
 
 
+int* calculateCPUPerf(int* board) {
+    int *cpuBoard = (int*) malloc(BOARD_SIZE * sizeof(int));
+    memcpy(cpuBoard, board, BOARD_SIZE * sizeof(int));
+    
+    // Warm-up.
+    for (int i = 0; i < 5; i++) {
+        stepBoard(cpuBoard);
+    }
+
+    double startTimeCPU = getTime();
+    for (int i = 0; i < NUM_STEPS; i++) {
+        cpuBoard = stepBoard(cpuBoard);
+    }
+    double endTimeCPU = getTime();
+    printf("CPU Time for %d Steps = %f ms\n", NUM_STEPS, 1000 * (endTimeCPU - startTimeCPU));
+
+    return cpuBoard;
+}
+
+
+int* calculateGPUPerf(int* board) {
+    int* h_newBoard = (int*) malloc(BOARD_SIZE * sizeof(int));
+
+    int* d_board;
+    int* d_newBoard;
+    cudaMalloc(&d_board, BOARD_SIZE * sizeof(int));
+    cudaMalloc(&d_newBoard, BOARD_SIZE * sizeof(int));
+
+    cudaMemcpy(d_board, board, BOARD_SIZE * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_newBoard, board, BOARD_SIZE * sizeof(int), cudaMemcpyHostToDevice);
+
+    // Warm-up.
+    for (int i = 0; i < 5; i++) {
+        stepBoardCuda<<<BOARD_HEIGHT, BOARD_WIDTH>>>(d_board, d_newBoard);
+    }
+
+    double startTimeGPU = getTime();
+    for (int i = 0; i < NUM_STEPS; i++) {
+        stepBoardCuda<<<BOARD_HEIGHT, BOARD_WIDTH>>>(d_board, d_newBoard);
+        if (i != NUM_STEPS - 1) {
+            int* temp = d_board;
+            d_board = d_newBoard;
+            d_newBoard = temp;
+        }
+    }
+    double endTimeGPU = getTime();
+    printf("GPU Time for %d Steps = %f ms\n", NUM_STEPS, 1000 * (endTimeGPU - startTimeGPU));
+
+    cudaMemcpy(h_newBoard, d_newBoard, BOARD_SIZE * sizeof(int), cudaMemcpyDeviceToHost);
+
+    return h_newBoard;
+}
+
+
 int main(int argc, char** argv) {
-    int board_size = BOARD_HEIGHT * BOARD_WIDTH;
-    int* board = (int*) malloc(board_size * sizeof(int));
-    for (int i = 0; i < board_size; i++) {
+    int* board = (int*) malloc(BOARD_SIZE * sizeof(int));
+    for (int i = 0; i < BOARD_SIZE; i++) {
         board[i] = 0;
     }
 
     if (PERFORMANCE_COMPARISON_MODE) {
-        for (int i = 0; i < board_size; i++) {
+        for (int i = 0; i < BOARD_SIZE; i++) {
             board[i] = (int) ((float) rand() / RAND_MAX > 0.5);
         }
 
-        // CPU
-        int *cpuBoard = (int*) malloc(board_size * sizeof(int));
-        memcpy(cpuBoard, board, board_size * sizeof(int));
-        double start_time_cpu = get_time();
-        for (int i = 0; i < NUM_STEPS; i++) {
-            cpuBoard = stepBoard(cpuBoard);
-        }
-        double end_time_cpu = get_time();
-        printf("CPU Time for %d Steps = %f ms\n", NUM_STEPS, 1000 * (end_time_cpu - start_time_cpu));
-
-        // GPU
-
-        int* h_newBoard = (int*) malloc(board_size * sizeof(int));
-
-        int* d_board;
-        int* d_newBoard;
-        cudaMalloc(&d_board, board_size * sizeof(int));
-        cudaMalloc(&d_newBoard, board_size * sizeof(int));
-
-        cudaMemcpy(d_board, board, board_size * sizeof(int), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_newBoard, board, board_size * sizeof(int), cudaMemcpyHostToDevice);
-
-        // Warm-up
-        for (int i = 0; i < 5; i++) {
-            stepBoardCuda<<<BOARD_HEIGHT, BOARD_WIDTH>>>(d_board, d_newBoard);
-        }
-
-        double start_time_gpu = get_time();
-        for (int i = 0; i < NUM_STEPS; i++) {
-            stepBoardCuda<<<BOARD_HEIGHT, BOARD_WIDTH>>>(d_board, d_newBoard);
-            if (i != NUM_STEPS - 1) {
-                int* temp = d_board;
-                d_board = d_newBoard;
-                d_newBoard = temp;
-            }
-        }
-        double end_time_gpu = get_time();
-        printf("GPU Time for %d Steps = %f ms\n", NUM_STEPS, 1000 * (end_time_gpu - start_time_gpu));
-
-        cudaMemcpy(h_newBoard, d_newBoard, board_size * sizeof(int), cudaMemcpyDeviceToHost);
+        int* cpuBoard = calculateCPUPerf(board);
+        int* gpuBoard = calculateGPUPerf(board);
 
         bool correct = true;
-        for (int i = 0; i < board_size; i++) {
-            if (h_newBoard[i] != cpuBoard[i]) {
+        for (int i = 0; i < BOARD_SIZE; i++) {
+            if (gpuBoard[i] != cpuBoard[i]) {
                 correct = false;
                 break;
             }
         }
         printf("CPU and GPU Versions match = %d\n", correct);
     } else {
+        // Glider.
         board[0] = 1;
         board[BOARD_WIDTH + 1] = 1;
         board[BOARD_WIDTH + 2] = 1;
