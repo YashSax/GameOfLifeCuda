@@ -17,9 +17,11 @@ Since each cell in the grid acts independently, this game is wonderfully paralle
 On my NVIDIA GTX 1650, these are the results I got:
 
 CPU Execution Time scales quadratically with respect to the board size (understandably), but GPU performance stays flat.
+
 ![Board Size vs. Execution Time](figures/perf_vs_board_size.png)
 
 Both CPU and GPU Execution Time scale linearly with the number of steps (understandably).
+
 ![Number of Steps vs. Execution Time](figures/perf_vs_steps.png)
 
 Steps to run:
