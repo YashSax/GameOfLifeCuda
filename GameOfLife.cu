@@ -8,8 +8,8 @@
 #define PERFORMANCE_COMPARISON_MODE true
 
 #if PERFORMANCE_COMPARISON_MODE
-    #define BOARD_HEIGHT 256
-    #define BOARD_WIDTH  256
+    #define BOARD_HEIGHT 512
+    #define BOARD_WIDTH  512
     #define NUM_STEPS 256
 #else
     #define BOARD_HEIGHT 10
